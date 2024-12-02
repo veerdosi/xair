@@ -6,8 +6,16 @@ import numpy as np
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.tokenize import word_tokenize
 import nltk
+from dataclasses import dataclass
 
 nltk.download('punkt')
+
+@dataclass
+class ExplanationMetrics:
+    faithfulness: float
+    plausibility: float
+    coherence: float
+    factual_accuracy: float
 
 class Evaluator:
     def __init__(self, model, tokenizer, device):
@@ -84,6 +92,22 @@ class Evaluator:
                     metrics['factual_accuracy'].append(self.evaluate_factual_accuracy(question, answer, ground_truth))
         
         return {k: np.mean(v) for k, v in metrics.items()}
+    
+    class ExplanationMetricsCalculator:
+        @staticmethod
+        def calculate_metrics(generated_explanation: Dict[str, torch.Tensor], 
+                            ground_truth: Optional[Dict[str, torch.Tensor]] = None) -> ExplanationMetrics:
+            """Calculate explanation quality metrics"""
+            # Calculate metrics (simplified version)
+            return ExplanationMetrics(
+                faithfulness=torch.mean(generated_explanation['base_explanation']).item(),
+                plausibility=0.8,  # Would be based on human evaluation
+                coherence=torch.mean(generated_explanation['attention_patterns']).item(),
+                factual_accuracy=0.9 if ground_truth is None else torch.mean(torch.eq(
+                    generated_explanation['base_explanation'], 
+                    ground_truth['base_explanation']
+                )).item()
+            )
 
 # Usage in main script:
 # evaluator = Evaluator(model, tokenizer, device)

@@ -1,91 +1,156 @@
+# main.py
+
 import torch
 from transformers import GPT2Tokenizer
-from data_generator import DataGenerator
-from explainable_llm import ExplainableLLM
-from trainer import Trainer, QAExplanationDataset
-from evaluation_module import Evaluator
-from visualization_module import Visualizer
+from torch.utils.data import DataLoader
+import logging
+import argparse
+from pathlib import Path
+import yaml
 
-def main():
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+from core.explainable_llm import ExplainableLLM
+from data.data_generator import DataGenerator
+from eval.evaluation_module import Evaluator
+from training.trainer import Trainer
+from interface.dashboard import ExplanationDashboard
 
-    # Initialize tokenizer
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def load_config(config_path: str) -> dict:
+    """Load configuration from YAML file"""
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+def setup_model(config: dict, device: torch.device) -> tuple:
+    """Setup model and tokenizer"""
+    tokenizer = GPT2Tokenizer.from_pretrained(config['model']['tokenizer_name'])
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Set hyperparameters
-    vocab_size = len(tokenizer)
-    d_model = 768
-    nhead = 12
-    num_encoder_layers = 6
-    num_decoder_layers = 6
-    dim_feedforward = 3072
-    dropout = 0.1
+    model = ExplainableLLM(
+        vocab_size=len(tokenizer),
+        d_model=config['model']['d_model'],
+        nhead=config['model']['nhead'],
+        num_encoder_layers=config['model']['num_encoder_layers'],
+        num_decoder_layers=config['model']['num_decoder_layers'],
+        dim_feedforward=config['model']['dim_feedforward'],
+        dropout=config['model']['dropout']
+    ).to(device)
+    
+    return model, tokenizer
 
-    # Initialize model
-    model = ExplainableLLM(vocab_size, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout)
-    print("Model initialized")
-
-    # Generate or load dataset
-    data_file = "diverse_qa_dataset.pth"
+def prepare_data(config: dict, tokenizer) -> tuple:
+    """Prepare training, validation and test datasets"""
+    data_generator = DataGenerator()
+    
     try:
-        dataset = DataGenerator.load_dataset(data_file)
-        print(f"Dataset loaded from {data_file}")
+        dataset = DataGenerator.load_dataset(config['data']['dataset_path'])
+        logger.info(f"Dataset loaded from {config['data']['dataset_path']}")
     except FileNotFoundError:
-        print("Generating new dataset...")
-        data_generator = DataGenerator()
-        dataset = data_generator.generate_dataset(num_samples=1000)
-        data_generator.save_dataset(dataset, data_file)
-        print(f"Dataset saved to {data_file}")
+        logger.info("Generating new dataset...")
+        dataset = data_generator.generate_dataset(num_samples=config['data']['num_samples'])
+        data_generator.save_dataset(dataset, config['data']['dataset_path'])
+        logger.info(f"Dataset saved to {config['data']['dataset_path']}")
 
-    # Prepare datasets
-    train_size = int(0.8 * len(dataset))
-    val_size = int(0.1 * len(dataset))
-    train_dataset = QAExplanationDataset(dataset[:train_size], tokenizer, max_length=100)
-    val_dataset = QAExplanationDataset(dataset[train_size:train_size+val_size], tokenizer, max_length=100)
-    test_dataset = QAExplanationDataset(dataset[train_size+val_size:], tokenizer, max_length=100)
+    # Split dataset
+    train_size = int(config['data']['train_split'] * len(dataset))
+    val_size = int(config['data']['val_split'] * len(dataset))
+    
+    train_dataset = dataset[:train_size]
+    val_dataset = dataset[train_size:train_size + val_size]
+    test_dataset = dataset[train_size + val_size:]
+    
+    return train_dataset, val_dataset, test_dataset
 
-    # Initialize trainer
-    trainer = Trainer(model, tokenizer, device, checkpoint_dir='checkpoints', log_dir='logs')
+def train_model(model, train_dataset, val_dataset, config: dict, device: torch.device):
+    """Train the model"""
+    trainer = Trainer(
+        model=model,
+        device=device,
+        config=config['training']
+    )
+    
+    trainer.train(
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
+        num_epochs=config['training']['num_epochs']
+    )
+    
+    return trainer
 
-    # Train the model
-    trainer.train(train_dataset, val_dataset, batch_size=16, num_epochs=5, checkpoint_interval=1)
-
-    # Initialize evaluator
+def evaluate_model(model, test_dataset, tokenizer, device: torch.device):
+    """Evaluate the model"""
     evaluator = Evaluator(model, tokenizer, device)
-
-    # Evaluate the model
-    test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=16)
+    test_dataloader = DataLoader(test_dataset, batch_size=16)
     metrics = evaluator.evaluate_batch(test_dataloader)
-    print("Evaluation metrics:")
+    
+    logger.info("Evaluation metrics:")
     for metric, value in metrics.items():
-        print(f"{metric}: {value:.4f}")
+        logger.info(f"{metric}: {value:.4f}")
+    
+    return metrics
 
-    # Initialize visualizer
-    visualizer = Visualizer(tokenizer)
+def launch_dashboard(model, tokenizer, config: dict):
+    """Launch the interactive dashboard"""
+    dashboard = ExplanationDashboard(
+        model=model,
+        tokenizer=tokenizer,
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    )
+    dashboard.launch(share=config['dashboard']['share'])
 
-    # Generate QA with explanation and visualize
-    while True:
-        question = input("Enter a question (or 'q' to quit): ")
-        if question.lower() == 'q':
-            break
+def main():
+    parser = argparse.ArgumentParser(description='Explainable LLM Training and Evaluation')
+    parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
+    parser.add_argument('--mode', type=str, choices=['train', 'eval', 'dashboard'], default='train', help='Operation mode')
+    args = parser.parse_args()
+
+    # Load configuration
+    config = load_config(args.config)
+    
+    # Setup device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+
+    # Setup model and tokenizer
+    model, tokenizer = setup_model(config, device)
+    logger.info("Model initialized")
+
+    if args.mode == 'train':
+        # Prepare data
+        train_dataset, val_dataset, test_dataset = prepare_data(config, tokenizer)
         
-        answer, explanation, attention_weights, attention_patterns = trainer.generate_qa_with_explanation(question)
-        print(f"\nAnswer: {answer}")
-        print(f"\nExplanation: {explanation}")
+        # Train model
+        trainer = train_model(model, train_dataset, val_dataset, config, device)
         
-        # Visualize attention
-        visualizer.visualize_explanation(question, answer, explanation, attention_weights, attention_patterns)
+        # Evaluate model
+        metrics = evaluate_model(model, test_dataset, tokenizer, device)
         
-        # Evaluate the generated answer and explanation
-        faithfulness = evaluator.evaluate_faithfulness(question, answer, explanation)
-        coherence = evaluator.evaluate_coherence(explanation)
-        print(f"\nFaithfulness: {faithfulness:.4f}")
-        print(f"Coherence: {coherence:.4f}")
+    elif args.mode == 'eval':
+        # Load trained model
+        checkpoint_path = Path(config['model']['checkpoint_path'])
+        if checkpoint_path.exists():
+            state_dict = torch.load(checkpoint_path)
+            model.load_state_dict(state_dict)
+            logger.info(f"Loaded model from {checkpoint_path}")
+        else:
+            logger.error(f"No checkpoint found at {checkpoint_path}")
+            return
+
+        # Prepare test data and evaluate
+        _, _, test_dataset = prepare_data(config, tokenizer)
+        metrics = evaluate_model(model, test_dataset, tokenizer, device)
         
-        print("\n" + "="*50 + "\n")
+    elif args.mode == 'dashboard':
+        # Load trained model if available
+        checkpoint_path = Path(config['model']['checkpoint_path'])
+        if checkpoint_path.exists():
+            state_dict = torch.load(checkpoint_path)
+            model.load_state_dict(state_dict)
+            logger.info(f"Loaded model from {checkpoint_path}")
+            
+        # Launch dashboard
+        launch_dashboard(model, tokenizer, config)
 
 if __name__ == "__main__":
     main()

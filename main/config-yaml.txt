@@ -1,0 +1,45 @@
+# config/config.yaml
+
+model:
+  tokenizer_name: "gpt2"
+  d_model: 768
+  nhead: 12
+  num_encoder_layers: 6
+  num_decoder_layers: 6
+  dim_feedforward: 3072
+  dropout: 0.1
+  checkpoint_path: "checkpoints/model.pt"
+
+data:
+  dataset_path: "data/qa_dataset.pt"
+  num_samples: 1000
+  train_split: 0.8
+  val_split: 0.1
+  max_length: 512
+
+training:
+  batch_size: 16
+  num_epochs: 5
+  learning_rate: 1e-4
+  warmup_steps: 1000
+  gradient_clip_val: 1.0
+  checkpoint_interval: 1
+  early_stopping_patience: 3
+  scheduler:
+    type: "linear"
+    num_warmup_steps: 1000
+
+evaluation:
+  batch_size: 16
+  num_samples: 100
+  metrics:
+    - "faithfulness"
+    - "plausibility"
+    - "coherence"
+    - "factual_accuracy"
+
+dashboard:
+  share: false
+  theme: "default"
+  max_length: 100
+  update_interval: 1.0

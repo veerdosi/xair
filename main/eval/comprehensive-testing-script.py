@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from explainable_llm import ExplainableLLM
-from trainer import Trainer, QAExplanationDataset
+from main.training.trainer import Trainer, QAExplanationDataset
 from evaluation_module import Evaluator
 from visualization_module import Visualizer
 from human_evaluation_protocol import HumanEvaluationProtocol
