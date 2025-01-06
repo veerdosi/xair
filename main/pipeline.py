@@ -307,159 +307,117 @@ class FinalExplanationPipeline:
             torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32
         ).to(self.device)
         
-        # Initialize enhanced components
+        # Initialize components from explanation.py
+        self.evidence_base = EvidenceBase()
+        self.counterfactual_gen = CounterfactualGenerator()
+        self.prober = Prober(self.evidence_base)
+        
+        # Initialize other components
         self.preprocessor = DataPreprocessor(self.tokenizer)
         self.evaluator = ExplanationEvaluator(self.tokenizer)
         self.checkpointer = EnhancedModelCheckpointer(output_dir)
         self.domain_metrics = DomainMetrics()
-        self.augmentor = DataAugmentor(self._get_domains())
         
         self.training_data_path = training_data_path
         
-    def _get_domains(self) -> List[str]:
-        """Get list of domains from training data"""
-        with open(self.training_data_path, 'r') as f:
-            data = json.load(f)
-        return list(set(item['domain'] for item in data))
+    def generate_explanation(self, query: str, domain: str) -> Dict[str, Any]:
+        """Generate comprehensive explanation using all components"""
+        # Generate base explanation using the model
+        input_text = f"Query: {query}\nDomain: {domain}\n"
+        input_ids = self.tokenizer.encode(
+            input_text,
+            return_tensors='pt',
+            max_length=512,
+            truncation=True
+        ).to(self.device)
         
+        outputs = self.model.generate(
+            input_ids,
+            max_length=512,
+            num_return_sequences=1,
+            no_repeat_ngram_size=3,
+            do_sample=True,
+            top_p=0.9,
+            temperature=0.7
+        )
+        
+        base_explanation = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Get relevant evidence
+        evidence = self.evidence_base.get_relevant_evidence(domain, query)
+        
+        # Generate counterfactuals
+        counterfactuals = self.counterfactual_gen.generate_counterfactuals(
+            query, 
+            domain,
+            context={"current_explanation": base_explanation}
+        )
+        
+        # Generate probing questions
+        probing_questions = self.prober.generate_probing_questions(
+            base_explanation,
+            domain,
+            depth=3
+        )
+        
+        # Calculate confidence
+        confidence = self._calculate_confidence(outputs[0])
+        
+        return {
+            'explanation': base_explanation,
+            'evidence': evidence,
+            'counterfactuals': counterfactuals,
+            'probing_questions': probing_questions,
+            'confidence': confidence,
+            'domain': domain
+        }
+    
+    def _calculate_confidence(self, output_ids: torch.Tensor) -> float:
+        """Calculate confidence score for generated explanation"""
+        with torch.no_grad():
+            logits = self.model(output_ids.unsqueeze(0)).logits
+            probs = torch.softmax(logits, dim=-1)
+            token_confidences = torch.max(probs, dim=-1).values
+            return float(torch.mean(token_confidences).item())
+            
     def fine_tune(self, 
                   validation_split: float = 0.1,
                   save_format: str = 'complete',
                   augment_data: bool = True):
-        """Enhanced fine-tuning with all features"""
+        """Enhanced fine-tuning with integration of explanation components"""
         
-        # Preprocess and augment data
+        # Load and preprocess data
         processed_data = self.preprocessor.preprocess_dataset(
             self.training_data_path,
             save_path=f"{self.output_dir}/processed_data.json"
         )
         
-        if augment_data:
-            augmented_data = []
-            for example in processed_data:
-                augmented_data.extend(
-                    self.augmentor.generate_domain_variations(example)
-                )
-            processed_data = augmented_data
+        # Enhance data with counterfactuals and probing questions
+        enhanced_data = []
+        for example in processed_data:
+            counterfactuals = self.counterfactual_gen.generate_counterfactuals(
+                example['query'],
+                example['domain']
+            )
+            
+            probing_questions = self.prober.generate_probing_questions(
+                example.get('explanation', ''),
+                example['domain']
+            )
+            
+            enhanced_example = {
+                **example,
+                'counterfactuals': counterfactuals,
+                'probing_questions': probing_questions
+            }
+            enhanced_data.append(enhanced_example)
         
         # Split data
         train_data, val_data = train_test_split(
-            processed_data,
+            enhanced_data,
             test_size=validation_split,
             random_state=42
         )
-        
-        # Create datasets
-        train_dataset = ExplanationDataset(train_data, self.tokenizer)
-        val_dataset = ExplanationDataset(val_data, self.tokenizer)
-        
-        # Enhanced training arguments
-        training_args = TrainingArguments(
-            output_dir=self.output_dir,
-            num_train_epochs=3,
-            per_device_train_batch_size=4,
-            per_device_eval_batch_size=4,
-            gradient_accumulation_steps=4,
-            warmup_steps=500,
-            learning_rate=2e-5,
-            fp16=True if self.device == 'cuda' else False,
-            logging_dir=f"{self.output_dir}/logs",
-            logging_steps=10,
-            evaluation_strategy=IntervalStrategy.STEPS
-            eval_steps=100,
-            save_strategy=IntervalStrategy.STEPS,
-            save_steps=100,
-            save_total_limit=3,
-            load_best_model_at_end=True,
-            metric_for_best_model='eval_loss',
-            greater_is_better=False,
-            weight_decay=0.01,
-            report_to='tensorboard'
-        )
-        
-        def compute_metrics(eval_pred):
-            """Enhanced metric computation with domain-specific metrics"""
-            predictions, labels = eval_pred
-            decoded_preds = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
-            decoded_labels = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
-            
-            # Calculate general metrics
-            metrics = {}
-            for pred, label, example in zip(decoded_preds, decoded_labels, val_data):
-                # Standard metrics
-                sample_metrics = self.evaluator.calculate_metrics(pred, label)
-                
-                # Domain-specific metrics
-                domain_metrics = self.domain_metrics.calculate_domain_metrics(
-                    pred, label, example['domain']
-                )
-                
-                # Combine metrics
-                all_metrics = {**sample_metrics, **domain_metrics}
-                for key, value in all_metrics.items():
-                    metrics[key] = metrics.get(key, 0) + value
-                    
-            # Average metrics
-            for key in metrics:
-                metrics[key] /= len(decoded_preds)
-                
-            return metrics
-        
-        # Initialize trainer with enhanced features
-        trainer = Trainer(
-            model=self.model,
-            args=training_args,
-            train_dataset=train_dataset,
-            eval_dataset=val_dataset,
-            compute_metrics=compute_metrics,
-            data_collator=DataCollatorForLanguageModeling(
-                tokenizer=self.tokenizer,
-                mlm=False
-            )
-        )
-        
-        # Training with enhanced progress tracking
-        try:
-            trainer.train()
-            
-            # Save final model with enhanced checkpointing
-            final_metrics = trainer.evaluate()
-            checkpoint_path = self.checkpointer.save_checkpoint(
-                self.model,
-                self.tokenizer,
-                final_metrics,
-                step='final',
-                save_format=save_format
-            )
-            
-            # Cleanup old checkpoints
-            self.checkpointer.cleanup_old_checkpoints(keep_top_k=3)
-            
-            # Save training summary
-            self._save_training_summary(
-                final_metrics,
-                checkpoint_path,
-                len(train_data),
-                len(val_data)
-            )
-            
-            return checkpoint_path
-            
-        except Exception as e:
-            logging.error(f"Training error: {str(e)}")
-            # Save emergency checkpoint if possible
-            try:
-                emergency_path = self.checkpointer.save_checkpoint(
-                    self.model,
-                    self.tokenizer,
-                    {"error": str(e)},
-                    step='emergency',
-                    save_format='complete'
-                )
-                logging.info(f"Emergency checkpoint saved at: {emergency_path}")
-            except:
-                logging.error("Failed to save emergency checkpoint")
-            raise
             
     def _save_training_summary(self,
                              metrics: Dict[str, float],
