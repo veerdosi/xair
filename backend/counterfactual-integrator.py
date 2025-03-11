@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .counterfactual import Counterfactual
     from .cgrt_tree import CGRTTree
-
+ 
 @dataclass
 class IntegrationPoint:
     original_node_id: str
