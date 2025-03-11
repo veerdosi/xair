@@ -30,12 +30,12 @@ class BaseLLMInterface(ABC):
     async def get_attention_flow(self, text: str) -> np.ndarray:
         pass
 
-class DeepSeekInterface(BaseLLMInterface):
+class LLMInterface(BaseLLMInterface):
     def __init__(
         self,
         api_key: str,
-        api_endpoint: str = "https://api.deepseek.ai/v1",
-        model_name: str = "deepseek-r1",
+        api_endpoint: str = "https://api.openai.com/v1",
+        model_name: str = "gpt-4o",
         max_tokens: int = 2048,
         temperature: float = 0.7,
         return_logits: bool = True,
@@ -70,7 +70,7 @@ class DeepSeekInterface(BaseLLMInterface):
     )
     async def query(self, prompt: str) -> LLMResponse:
         """
-        Send a query to the DeepSeek API and return the response.
+        Send a query to the ChatGPT-4o API and return the response.
         Includes retry logic for resilience.
         """
         if not self.session:
@@ -78,14 +78,15 @@ class DeepSeekInterface(BaseLLMInterface):
 
         try:
             async with self.session.post(
-                f"{self.api_endpoint}/generate",
+                f"{self.api_endpoint}/chat/completions",
                 json={
                     "model": self.model_name,
-                    "prompt": prompt,
+                    "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": self.max_tokens,
                     "temperature": self.temperature,
-                    "return_logits": self.return_logits,
-                    "return_attention": self.return_attention,
+                    "logprobs": self.return_logits,
+                    "stream": False,
+                    "logit_bias": {}  # Optional parameter
                 },
             ) as response:
                 if response.status != 200:
@@ -93,11 +94,28 @@ class DeepSeekInterface(BaseLLMInterface):
                     raise Exception(f"API error: {response.status} - {error_text}")
                 
                 data = await response.json()
+                
+                # Extract text from the response
+                text = data["choices"][0]["message"]["content"]
+                
+                # Extract logits if available
+                logits = None
+                if self.return_logits and "logprobs" in data["choices"][0]:
+                    logits = np.array(data["choices"][0]["logprobs"]["token_logprobs"])
+                
+                # Extract tokens if available
+                tokens = None
+                if self.return_logits and "logprobs" in data["choices"][0]:
+                    tokens = data["choices"][0]["logprobs"]["tokens"]
+                
+                # OpenAI doesn't directly provide attention matrices, so this is null
+                attention = None
+                
                 return LLMResponse(
-                    text=data["text"],
-                    logits=np.array(data.get("logits")) if data.get("logits") else None,
-                    attention=np.array(data.get("attention")) if data.get("attention") else None,
-                    tokens=data.get("tokens"),
+                    text=text,
+                    logits=logits,
+                    attention=attention,
+                    tokens=tokens,
                 )
 
         except aiohttp.ClientError as e:
@@ -113,27 +131,48 @@ class DeepSeekInterface(BaseLLMInterface):
         if response.logits is None or response.tokens is None:
             raise ValueError("Logits or tokens not returned from LLM")
 
-        # Apply softmax to get probabilities
-        exp_logits = np.exp(response.logits - np.max(response.logits))
-        probs = exp_logits / exp_logits.sum()
+        # Convert logprobs to probabilities
+        # logprob = log(p), so p = exp(logprob)
+        probs = np.exp(response.logits)
 
         return dict(zip(response.tokens, probs.tolist()))
 
     async def get_attention_flow(self, text: str) -> np.ndarray:
         """
         Get attention flow matrices for a given text.
-        Returns a numpy array of attention weights.
+        Note: OpenAI API doesn't provide attention matrices directly.
+        This method returns a placeholder or raises an exception.
         """
-        response = await self.query(text)
-        if response.attention is None:
-            raise ValueError("Attention matrices not returned from LLM")
-        return response.attention
+        raise NotImplementedError(
+            "ChatGPT-4o API does not provide attention matrices. "
+            "Consider using embeddings or other alternatives for analyzing token relationships."
+        )
 
     async def batch_query(self, prompts: List[str]) -> List[LLMResponse]:
         """
         Process multiple prompts in parallel.
         """
         return await asyncio.gather(*(self.query(prompt) for prompt in prompts))
+
+async def main():
+    # Example usage
+    api_key = "your-api-key-here"
+    async with ChatGPT4oInterface(api_key=api_key) as client:
+        response = await client.query("Tell me about artificial intelligence.")
+        print(f"Response: {response.text}")
+        
+        # Get token probabilities
+        try:
+            probs = await client.get_token_probabilities("What is machine learning?")
+            print(f"Token probabilities: {probs}")
+        except NotImplementedError as e:
+            print(f"Token probabilities error: {e}")
+        
+        # Try to get attention flow (will raise NotImplementedError)
+        try:
+            attention = await client.get_attention_flow("What is deep learning?")
+        except NotImplementedError as e:
+            print(f"Attention flow error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

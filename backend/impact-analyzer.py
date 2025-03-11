@@ -10,7 +10,7 @@ import asyncio
 from functools import lru_cache
 import json
 
-from llm_interface import DeepSeekInterface, LLMResponse
+from llm_interface import LLMInterface, LLMResponse
 from reasoning_tree import ReasoningTreeGenerator, TreeNode
 from counterfactual_generator import CounterfactualGenerator, Counterfactual
 from counterfactual_integrator import CounterfactualIntegrator, IntegrationPoint
@@ -48,7 +48,7 @@ class ImpactCache:
 class ImpactAnalyzer:
     def __init__(
         self,
-        llm: DeepSeekInterface,
+        llm: LLMInterface,
         tree_generator: ReasoningTreeGenerator,
         cf_generator: CounterfactualGenerator,
         cf_integrator: CounterfactualIntegrator,
@@ -561,7 +561,7 @@ class ImpactAnalyzer:
 
 # Example usage:
 async def main():
-    async with DeepSeekInterface(api_key="your_api_key_here") as llm:
+    async with LLMInterface(api_key="your_api_key_here") as llm:
         # Initialize components
         tree_generator = ReasoningTreeGenerator(llm)
         cf_generator = CounterfactualGenerator(llm, tree_generator)
