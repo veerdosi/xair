@@ -10,6 +10,7 @@ import asyncio
 from functools import lru_cache
 import json
 
+from backend.error_handling import XAIRError, log_exception
 from llm_interface import LLMInterface, LLMResponse
 from reasoning_tree import ReasoningTreeGenerator, TreeNode
 from counterfactual_generator import CounterfactualGenerator, Counterfactual

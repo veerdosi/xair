@@ -5,6 +5,7 @@ import networkx as nx
 from uuid import uuid4
 from collections import defaultdict
 from scipy.spatial.distance import cosine
+from backend.error_handling import XAIRError, log_exception
 
 @dataclass
 class CGRTNode:
