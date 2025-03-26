@@ -1,6 +1,6 @@
 """
 Main entry point for the XAIR system.
-Integrates CGRT and Counterfactual components.
+Integrates CGRT, Counterfactual, and Knowledge Graph components.
 """
 
 import os
@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional
 from backend.models.llm_interface import LlamaInterface, GenerationConfig
 from backend.cgrt.cgrt_main import CGRT
 from backend.counterfactual.counterfactual_main import Counterfactual
+from backend.knowledge_graph.kg_main import KnowledgeGraph
 
 # Configure logging
 logging.basicConfig(
@@ -30,7 +31,7 @@ def setup_parser():
                         help="Device to use (cpu, cuda, mps, or auto)")
     
     # Generation settings
-    parser.add_argument("--max-tokens", type=int, default=512, 
+    parser.add_argument("--max-tokens", type=int, default=256, 
                         help="Maximum tokens to generate")
     parser.add_argument("--temperatures", type=str, default="0.2,0.7,1.0", 
                         help="Comma-separated temperatures for generation")
@@ -44,6 +45,14 @@ def setup_parser():
                         help="Minimum attention threshold for counterfactuals")
     parser.add_argument("--max-counterfactuals", type=int, default=20, 
                         help="Maximum counterfactuals to generate")
+    
+    # Knowledge Graph settings
+    parser.add_argument("--kg-use-local-model", action="store_true", 
+                        help="Use local sentence transformer model")
+    parser.add_argument("--kg-similarity-threshold", type=float, default=0.6, 
+                        help="Minimum similarity threshold for KG entity mapping")
+    parser.add_argument("--kg-skip", action="store_true",
+                        help="Skip Knowledge Graph processing (useful for slower machines)")
     
     # Output settings
     parser.add_argument("--output-dir", type=str, default="output", 
@@ -93,6 +102,16 @@ def main():
         output_dir=os.path.join(args.output_dir, "counterfactual"),
         verbose=args.verbose
     )
+    
+    # Initialize Knowledge Graph component
+    if not args.kg_skip:
+        logger.info("Initializing Knowledge Graph...")
+        knowledge_graph = KnowledgeGraph(
+            use_local_model=args.kg_use_local_model,
+            min_similarity_threshold=args.kg_similarity_threshold,
+            output_dir=os.path.join(args.output_dir, "knowledge_graph"),
+            verbose=args.verbose
+        )
     
     # Interactive prompt loop
     while True:
@@ -144,6 +163,42 @@ def main():
                 # Print CFR
                 cfr = counterfactual.generator.calculate_cfr()
                 print(f"\nCounterfactual Flip Rate (CFR): {cfr:.2f}")
+                
+                # Process with Knowledge Graph (if not skipped)
+                if not args.kg_skip:
+                    logger.info("Processing with Knowledge Graph...")
+                    try:
+                        # Map nodes to entities and validate reasoning
+                        entity_mapping, validation_results = knowledge_graph.process_reasoning_tree(
+                            cgrt.tree_builder,
+                            cgrt.paths
+                        )
+                        
+                        # Get validation summary
+                        summary = knowledge_graph.get_validation_summary()
+                        
+                        # Print validation summary
+                        print("\nKnowledge Graph Validation:")
+                        print("=" * 50)
+                        print(f"Average trustworthiness score: {summary['average_trustworthiness']:.2f}")
+                        print(f"Supported statements: {summary['total_supported_statements']}")
+                        print(f"Contradicted statements: {summary['total_contradicted_statements']}")
+                        print(f"Unverified statements: {summary['total_unverified_statements']}")
+                        
+                        # Print most trustworthy path
+                        most_trustworthy_path_id = summary['most_trustworthy_path']['path_id']
+                        most_trustworthy_score = summary['most_trustworthy_path']['score']
+                        print(f"Most trustworthy path: Path {most_trustworthy_path_id} (Score: {most_trustworthy_score:.2f})")
+                        
+                        # Export detailed report
+                        report_path = os.path.join(args.output_dir, "knowledge_graph", "validation_report.txt")
+                        knowledge_graph.validator.export_validation_report(report_path)
+                        logger.info(f"Exported knowledge graph validation report to {report_path}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error in Knowledge Graph processing: {e}")
+                        import traceback
+                        traceback.print_exc()
                 
                 # Save states
                 cgrt.tree_builder.save_tree(os.path.join(args.output_dir, "reasoning_tree.json"))
