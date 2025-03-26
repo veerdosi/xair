@@ -549,10 +549,13 @@ class CGRTBuilder:
             "importance_scores": {node_id: node.importance_score for node_id, node in self.nodes.items()}
         }
     
-    def to_dependentree_format(self):
+    def to_dependentree_format(self, max_depth=20):
         """
         Convert the tree to DependenTree format for visualization.
         
+        Args:
+            max_depth: Maximum depth to prevent recursion errors
+            
         Returns:
             Dictionary in DependenTree format
         """
@@ -568,19 +571,24 @@ class CGRTBuilder:
         
         # Create the tree structure
         tree = {
-            "text": "",
+            "text": "Root",
             "children": []
         }
         
-        # Add nodes by position
+        # Add nodes by position with depth limit
         current_level = tree
-        for pos in positions:
+        
+        for pos_idx, pos in enumerate(positions):
+            if pos_idx >= max_depth:
+                current_level["children"].append({"text": "... (more nodes, depth limit reached)"})
+                break
+                
             # Sort nodes by importance
             nodes = sorted(pos_nodes[pos], key=lambda n: n.importance_score, reverse=True)
             
             # Create child nodes
             children = []
-            for node in nodes:
+            for node in nodes[:10]:  # Limit to top 10 nodes per position to prevent bloat
                 child = {
                     "id": node.id,
                     "text": node.token,
@@ -594,6 +602,7 @@ class CGRTBuilder:
             # Add to the current level
             if children:
                 current_level["children"] = children
-                current_level = children[0]  # Follow the highest importance path
+                if pos_idx < len(positions) - 1:  # Check if we're not at the last position
+                    current_level = children[0]  # Follow the highest importance path
         
         return tree

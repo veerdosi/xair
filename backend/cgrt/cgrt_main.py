@@ -464,12 +464,39 @@ class CGRT:
         # Create the directory if it doesn't exist
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # Convert to visualization format
-        viz_data = self.to_dependentree_format()
-        
-        # Save to file
-        with open(output_path, "w") as f:
-            json.dump(viz_data, f, indent=2)
+        try:
+            # Convert to visualization format
+            viz_data = self.to_dependentree_format()
+            
+            # Save to file
+            with open(output_path, "w") as f:
+                json.dump(viz_data, f, indent=2)
+                
+        except RecursionError:
+            # Fallback: create simplified tree to avoid recursion
+            logger.warning("Recursion error detected. Creating simplified visualization.")
+            
+            # Create a simplified tree
+            simple_tree = {
+                "text": "Root",
+                "children": []
+            }
+            
+            # Add top-level nodes only (first few positions)
+            positions = set(node.position for node in self.tree_builder.nodes.values())
+            for pos in sorted(positions)[:10]:  # First 10 positions only
+                pos_nodes = [n for n in self.tree_builder.nodes.values() if n.position == pos]
+                for node in pos_nodes[:5]:  # Top 5 nodes per position
+                    simple_tree["children"].append({
+                        "id": node.id,
+                        "text": node.token,
+                        "importance": node.importance_score,
+                        "is_divergence": node.is_divergence_point,
+                    })
+            
+            # Save simplified tree
+            with open(output_path, "w") as f:
+                json.dump(simple_tree, f, indent=2)
         
         logger.info(f"Exported tree visualization to {output_path}")
         return output_path
