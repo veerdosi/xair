@@ -1,0 +1,17 @@
+# Core dependencies
+torch
+transformers
+scipy
+numpy
+networkx
+
+# Model optimization
+optimum
+accelerate
+
+# Visualization 
+matplotlib
+seaborn
+
+# Knowledge Graph
+rdflib

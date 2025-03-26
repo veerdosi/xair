@@ -1,0 +1,12 @@
+[
+  {
+    "timestamp": 1743013128.0893672,
+    "node_id": "path0_pos0_token198",
+    "original_importance": 0.5223396480083465,
+    "new_importance": 0.9,
+    "reason": "Example adjustment",
+    "user_id": "user",
+    "propagation_enabled": true,
+    "propagation_factor": 0.5
+  }
+]
