@@ -44,7 +44,7 @@ class LlamaInterface:
         load_in_4bit: bool = False,  # Ignored for Mac compatibility
         cpu_offloading: bool = False,
         use_fp16: bool = True,       # Use half precision by default for memory efficiency
-        use_bettertransformer: bool = True,  # Use BetterTransformer for optimizing on Mac
+        use_bettertransformer: bool = False,
         verbose: bool = False
     ):
         """
