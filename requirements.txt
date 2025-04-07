@@ -1,23 +1,30 @@
 # Core dependencies
-torch
-transformers
-scipy
-numpy
-networkx
+torch>=2.0.0
+transformers>=4.35.0
+scipy>=1.11.0
+numpy>=1.24.0
+networkx>=3.1
 
 # Model optimization
-optimum
-accelerate
+optimum>=1.16.0
+accelerate>=0.23.0
 
-# Visualization 
-matplotlib
-seaborn
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
 
 # Knowledge Graph
-SPARQLWrapper
+SPARQLWrapper>=2.0.0
+spacy>=3.7.0
 
 # Counterfactual
-sentence-transformers
-rouge
-textblob
-scapy
+sentence-transformers>=2.2.0
+rouge>=1.0.1
+textblob>=0.17.0
+
+# Error handling and logging
+tqdm>=4.66.0
+rich>=13.0.0
+
+# Typing
+typing-extensions>=4.7.0
