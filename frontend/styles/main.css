@@ -1,0 +1,313 @@
+/* Main styles for XAI Chat Interface */
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c7d2fe;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #818cf8;
+}
+
+/* Chat message styling */
+.chat-message {
+  max-width: 90%;
+}
+
+.chat-message.user {
+  margin-left: auto;
+}
+
+.chat-message.user .message-content {
+  background-color: #4f46e5;
+  color: white;
+}
+
+.chat-message.system .message-content {
+  background-color: #e5e7eb;
+  color: #1f2937;
+}
+
+.chat-message.ai .message-content {
+  background-color: #c7d2fe;
+  color: #1e1b4b;
+}
+
+.message-content pre {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  overflow-x: auto;
+}
+
+.message-time {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  margin-top: 0.25rem;
+}
+
+/* Visualization elements */
+.reasoning-node {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reasoning-node:hover {
+  filter: brightness(110%);
+}
+
+.reasoning-node.selected {
+  stroke: #4f46e5;
+  stroke-width: 3px;
+}
+
+.reasoning-edge {
+  stroke: #d1d5db;
+  stroke-width: 2px;
+}
+
+.reasoning-edge.highlighted {
+  stroke: #4f46e5;
+  stroke-width: 3px;
+}
+
+.node-importance-high {
+  fill: #4f46e5;
+}
+
+.node-importance-medium {
+  fill: #818cf8;
+}
+
+.node-importance-low {
+  fill: #c7d2fe;
+}
+
+.divergence-point {
+  stroke: #ef4444;
+  stroke-width: 3px;
+}
+
+.counterfactual-highlight {
+  stroke: #f97316;
+  stroke-dasharray: 5,5;
+  stroke-width: 2px;
+}
+
+/* Animation for processing indicator */
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.6;
+  }
+}
+
+.pulse-animation {
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+/* Tooltip styling */
+.tooltip {
+  position: absolute;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.8rem;
+  z-index: 10;
+  max-width: 300px;
+  pointer-events: none;
+}
+
+/* Adjustments for mobile */
+@media (max-width: 768px) {
+  .chat-message {
+    max-width: 95%;
+  }
+
+  #viz-content {
+    min-height: 300px;
+  }
+
+  #messages {
+    max-height: 60vh;
+  }
+}
+
+/* Animation for new messages */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.new-message {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Node details panel */
+#node-details {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+/* Tree visualization */
+.tree-container {
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+}
+
+/* Loading spinner */
+.spinner {
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border-left-color: #4f46e5;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Importance slider color track */
+input[type=range]::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #c7d2fe, #4f46e5);
+  height: 4px;
+  border-radius: 2px;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: #4f46e5;
+  margin-top: -6px;
+  cursor: pointer;
+}
+
+/* Toggle switches */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 34px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: #4f46e5;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #4f46e5;
+}
+
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* Token importance visualization */
+.token-bar {
+  height: 20px;
+  transition: all 0.3s ease;
+}
+
+.token-bar:hover {
+  filter: brightness(110%);
+}
+
+.token-label {
+  font-size: 12px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* Counterfactual visualization */
+.counterfactual-bar {
+  height: 24px;
+  transition: all 0.3s ease;
+}
+
+.counterfactual-bar:hover {
+  filter: brightness(110%);
+}
+
+.counterfactual-label {
+  font-size: 12px;
+  fill: white;
+  text-anchor: start;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+/* Code blocks in messages */
+.message-content code {
+  font-family: monospace;
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 0.1rem 0.2rem;
+  border-radius: 0.2rem;
+}
+
+.message-content pre code {
+  background-color: transparent;
+  padding: 0;
+}
