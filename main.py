@@ -7,6 +7,7 @@ import os
 import logging
 import argparse
 import json
+import time
 from typing import Dict, List, Any, Optional
 import traceback
 
@@ -205,6 +206,16 @@ def process_prompt(
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
 
+    # Track overall progress
+    overall_start = time.time()
+    progress_monitor = cgrt.progress_monitor
+
+    # Get the progress monitor
+    if hasattr(cgrt, 'progress_monitor'):
+        progress_monitor = cgrt.progress_monitor
+    else:
+        progress_monitor = ProgressMonitor(verbose=config.verbose)
+
     # 1. Process with CGRT
     timer.start("cgrt_processing")
     logger.info("Processing with CGRT...")
@@ -270,15 +281,19 @@ def process_prompt(
         if knowledge_graph:
             timer.start("kg_processing")
             logger.info("Processing with Knowledge Graph...")
+            progress_monitor.start_stage(Stage.KG_ENTITY_MAPPING)
             try:
                 # Map nodes to entities and validate reasoning
                 entity_mapping, validation_results = knowledge_graph.process_reasoning_tree(
                     cgrt.tree_builder,
                     cgrt.paths
                 )
+                progress_monitor.complete_stage(Stage.KG_ENTITY_MAPPING)
 
                 # Get validation summary
+                progress_monitor.start_stage(Stage.KG_VALIDATION)
                 summary = knowledge_graph.get_validation_summary()
+                progress_monitor.complete_stage(Stage.KG_VALIDATION)
 
                 # Print validation summary
                 print("\nKnowledge Graph Validation:")
@@ -311,6 +326,7 @@ def process_prompt(
         # Generate visualizations if requested
         if generate_visualizations:
             timer.start("visualizations")
+            progress_monitor.start_stage(Stage.VISUALIZATION)
             try:
                 logger.info("Generating visualizations...")
                 viz_dir = export_visualization_report(
@@ -320,16 +336,34 @@ def process_prompt(
                     config.output_dir
                 )
                 logger.info(f"Visualizations saved to {viz_dir}")
+                progress_monitor.complete_stage(Stage.VISUALIZATION)
             except Exception as e:
                 logger.error(f"Error generating visualizations: {e}")
                 logger.debug(traceback.format_exc())
             finally:
                 timer.stop("visualizations")
 
+        # Complete progress monitoring
+        if hasattr(progress_monitor, 'complete'):
+            progress_monitor.complete()
+
+        # Calculate overall time
+        overall_end = time.time()
+        overall_duration = overall_end - overall_start
+
         # Print timing summary
         print("\nPerformance Timing:")
         print("=" * 50)
+        print(f"Total processing time: {overall_duration:.2f}s")
         print(timer.summary())
+
+        # Print progress summary
+        if hasattr(progress_monitor, 'get_stage_summary'):
+            stage_summary = progress_monitor.get_stage_summary()
+            for stage_name, duration in stage_summary.items():
+                if duration > 0.1:  # Only show significant stages
+                    percentage = (duration / overall_duration) * 100 if overall_duration > 0 else 0
+                    print(f"  {stage_name}: {duration:.2f}s ({percentage:.1f}%)")
 
         logger.info("Processing complete! Results saved to output directory.")
     else:
