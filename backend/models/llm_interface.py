@@ -209,8 +209,7 @@ class LlamaInterface:
         self,
         prompt: str,
         config: Optional[GenerationConfig] = None,
-        stream: bool = False,
-        fast_mode: bool = False
+        stream: bool = False
     ) -> Dict[str, Any]:
         """
         Generate a response from the model.
@@ -219,18 +218,12 @@ class LlamaInterface:
             prompt: Input prompt
             config: Generation configuration
             stream: Whether to stream the output
-            fast_mode: If True, skip collecting hidden states and attention to speed up generation
 
         Returns:
             Dictionary containing the generated text and associated metadata
         """
         if config is None:
             config = GenerationConfig()
-
-        # Apply fast mode settings if enabled
-        if fast_mode:
-            config.output_hidden_states = False
-            config.output_attentions = False
 
         # Tokenize the prompt
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True).to(self.device)
@@ -261,25 +254,20 @@ class LlamaInterface:
 
         # Generate without streaming
         with torch.no_grad():
-            generate_kwargs = {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "output_hidden_states": config.output_hidden_states,
-                "output_attentions": config.output_attentions,
-                "return_dict_in_generate": config.return_dict_in_generate,
-                "max_new_tokens": config.max_new_tokens,
-                "temperature": config.temperature,
-                "top_p": config.top_p,
-                "top_k": config.top_k,
-                "repetition_penalty": config.repetition_penalty,
-                "do_sample": config.do_sample,
-            }
-
-            # Only calculate scores if not in fast mode
-            if not fast_mode:
-                generate_kwargs["output_scores"] = True
-
-            outputs = self.model.generate(**generate_kwargs)
+            outputs = self.model.generate(
+                input_ids,
+                output_hidden_states=config.output_hidden_states,
+                output_attentions=config.output_attentions,
+                return_dict_in_generate=config.return_dict_in_generate,
+                max_new_tokens=config.max_new_tokens,
+                temperature=config.temperature,
+                top_p=config.top_p,
+                top_k=config.top_k,
+                repetition_penalty=config.repetition_penalty,
+                do_sample=config.do_sample,
+                output_scores = True,
+                attention_mask = attention_mask,
+            )
 
         # Get the generated text
         generated_ids = outputs.sequences
@@ -295,10 +283,6 @@ class LlamaInterface:
             "input_ids": input_ids,
             "generated_ids": generated_ids,
         }
-
-        # Skip processing hidden states, attentions, and token probabilities in fast mode
-        if fast_mode:
-            return result
 
         # Include hidden states and attentions if requested
         if config.output_hidden_states and hasattr(outputs, "hidden_states"):
