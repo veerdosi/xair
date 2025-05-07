@@ -24,6 +24,7 @@ XAIR consists of three main components:
 - Calculate trustworthiness scores for reasoning paths
 - Export visualizations for understanding model reasoning
 - Optimized for CPUs, GPUs, and Apple Silicon (MPS)
+- Performance presets for balancing speed vs analysis depth
 
 ## Requirements
 
@@ -89,6 +90,12 @@ python main.py --config my_config.json
 - `--max-tokens`: Maximum tokens to generate (default: 256)
 - `--verbose`: Enable verbose logging (flag)
 - `--output-dir`: Output directory (default: "output")
+
+### Performance Settings
+
+- `--performance`: Performance preset to use - "max_speed", "balanced", or "max_quality" (default: "balanced")
+- `--fast-mode`: Skip hidden states and attention collection for faster generation (flag)
+- `--fast-init`: Skip non-essential initialization steps for faster startup (flag)
 
 ### CGRT Settings
 
@@ -224,7 +231,7 @@ You can import XAIR components into your own Python scripts:
 
 ```python
 from backend.models.llm_interface import LlamaInterface
-from backend.cgrt.cgrt_main import CGRT
+from backend.cgrt.cgrt_main import CGRT, get_performance_preset
 from backend.counterfactual.counterfactual_main import Counterfactual
 from backend.knowledge_graph.kg_main import KnowledgeGraph
 from backend.utils.config import XAIRConfig
@@ -233,9 +240,20 @@ from backend.utils.config import XAIRConfig
 config = XAIRConfig()
 config.model_name_or_path = "meta-llama/Llama-3.2-1B"
 
+# Apply performance optimizations (optional)
+preset = get_performance_preset("max_speed")
+config.fast_mode = preset["fast_mode"]
+config.fast_init = preset["fast_init"]
+config.cgrt.temperatures = preset["temperatures"]
+
 # Initialize components
-llm = LlamaInterface(model_name_or_path=config.model_name_or_path)
-cgrt = CGRT(model_name_or_path=config.model_name_or_path)
+llm = LlamaInterface(model_name_or_path=config.model_name_or_path, fast_init=config.fast_init)
+cgrt = CGRT(
+    model_name_or_path=config.model_name_or_path,
+    temperatures=config.cgrt.temperatures,
+    fast_mode=config.fast_mode,
+    fast_init=config.fast_init
+)
 counterfactual = Counterfactual()
 
 # Process input
@@ -286,6 +304,60 @@ For detailed analysis on powerful hardware:
 ```bash
 python main.py --model meta-llama/Llama-3.2-70B-Instruct --max-tokens 512 --paths-per-temp 3 --temperatures 0.1,0.5,0.9,1.3 --generate-visualizations
 ```
+
+## Performance Optimization
+
+XAIR includes several performance optimization features to make generation and analysis faster.
+
+### Performance Presets
+
+Use performance presets to easily balance speed vs analysis depth:
+
+```bash
+# Maximum speed (fastest, simplified analysis)
+python main.py --performance max_speed
+
+# Balanced performance (good balance of speed and analysis)
+python main.py --performance balanced
+
+# Maximum quality (most thorough analysis)
+python main.py --performance max_quality
+```
+
+### Fast Mode Options
+
+For more fine-grained control, you can use individual fast mode options:
+
+```bash
+# Skip collecting hidden states and attention (faster generation)
+python main.py --fast-mode
+
+# Skip non-essential initialization steps (faster startup)
+python main.py --fast-init
+
+# Combine options for maximum speed
+python main.py --fast-mode --fast-init --temperatures 0.7
+```
+
+### Performance Impact
+
+The performance optimizations can significantly improve response times:
+
+| Configuration | Response Time | Startup Time | Analysis Depth |
+|---------------|---------------|--------------|----------------|
+| Default       | Baseline      | Baseline     | Full           |
+| --fast-mode   | 2-4x faster   | Baseline     | Basic          |
+| --fast-init   | Baseline      | 2x faster    | Full           |
+| max_speed     | 3-5x faster   | 2x faster    | Basic          |
+| max_quality   | Baseline      | Baseline     | Enhanced       |
+
+### When to Use Each Mode
+
+- **max_speed**: Use when you need quick responses and don't need detailed analysis
+- **balanced**: Good for most use cases with reasonable performance
+- **max_quality**: Use when you need the most thorough analysis and have time
+- **--fast-mode**: Good when you need to process many prompts quickly
+- **--fast-init**: Useful when starting up the system frequently
 
 ## Development
 

@@ -58,6 +58,10 @@ class XAIRConfig:
     max_tokens: int = 256
     output_dir: str = "output"
     verbose: bool = False
+    # Performance optimization parameters
+    performance: str = "balanced"  # "max_speed", "balanced", "max_quality"
+    fast_mode: bool = False
+    fast_init: bool = False
     cgrt: CGRTConfig = field(default_factory=CGRTConfig)
     counterfactual: CounterfactualConfig = field(default_factory=CounterfactualConfig)
     knowledge_graph: KnowledgeGraphConfig = field(default_factory=KnowledgeGraphConfig)
@@ -89,15 +93,15 @@ class XAIRConfig:
         """Load configuration from a JSON file."""
         with open(path, "r") as f:
             config_dict = json.load(f)
-        
+
         # Extract component configs
         cgrt_dict = config_dict.pop("cgrt", {})
         counterfactual_dict = config_dict.pop("counterfactual", {})
         kg_dict = config_dict.pop("knowledge_graph", {})
-        
+
         # Create config object
         config = cls(**config_dict)
-        
+
         # Update component configs
         if cgrt_dict:
             config.cgrt = CGRTConfig(**cgrt_dict)
@@ -105,7 +109,7 @@ class XAIRConfig:
             config.counterfactual = CounterfactualConfig(**counterfactual_dict)
         if kg_dict:
             config.knowledge_graph = KnowledgeGraphConfig(**kg_dict)
-            
+
         return config
 
     @classmethod
@@ -116,7 +120,7 @@ class XAIRConfig:
             temperatures = [float(t) for t in args.temperatures.split(",")]
         else:
             temperatures = [0.2, 0.7, 1.0]
-            
+
         # Create main config
         config = cls(
             model_name_or_path=args.model,
@@ -124,22 +128,26 @@ class XAIRConfig:
             max_tokens=args.max_tokens,
             output_dir=args.output_dir,
             verbose=args.verbose,
+            # Performance settings
+            performance=args.performance if hasattr(args, "performance") else "balanced",
+            fast_mode=args.fast_mode if hasattr(args, "fast_mode") else False,
+            fast_init=args.fast_init if hasattr(args, "fast_init") else False,
             skip_kg=args.kg_skip if hasattr(args, "kg_skip") else False
         )
-        
+
         # Update CGRT config
         config.cgrt.temperatures = temperatures
         config.cgrt.paths_per_temp = args.paths_per_temp
-        
+
         # Update Counterfactual config
         config.counterfactual.top_k_tokens = args.counterfactual_tokens
         config.counterfactual.min_attention_threshold = args.attention_threshold
         config.counterfactual.max_total_candidates = args.max_counterfactuals
-        
+
         # Update Knowledge Graph config
         if hasattr(args, "kg_use_local_model"):
             config.knowledge_graph.use_local_model = args.kg_use_local_model
         if hasattr(args, "kg_similarity_threshold"):
             config.knowledge_graph.min_similarity_threshold = args.kg_similarity_threshold
-            
+
         return config
