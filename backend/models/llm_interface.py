@@ -99,37 +99,37 @@ class LlamaInterface:
             device_map = device
             logger.info(f"Using device: {device_map}")
 
-        # Additional optimization options for fast loading
-        model_kwargs = {
-            "torch_dtype": dtype,
-            "device_map": device_map,
-            "attn_implementation": "eager"
-        }
-
-        # Add fast init options
-        if fast_init:
-            # Low memory mode only when needed
-            if device == "cpu":
-                model_kwargs["low_cpu_mem_usage"] = True
-
-            # Skip non-critical safety checks for faster init
-            if "Llama" in model_name_or_path:
-                model_kwargs["use_safetensors"] = True
-                model_kwargs["use_fast_tokenizer"] = True
-
         # Load model
         try:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name_or_path,
-                **model_kwargs
+                torch_dtype=dtype,
+                device_map=device_map,
+                attn_implementation="eager"
             )
 
             # Apply BetterTransformer if requested (helps with MPS performance)
             if use_bettertransformer:
                 try:
-                    from optimum.bettertransformer import BetterTransformer
-                    logger.info("Applying BetterTransformer optimization")
-                    self.model = BetterTransformer.transform(self.model)
+                    # Check if we're using a version that supports native attention
+                    import pkg_resources
+                    transformers_version = pkg_resources.get_distribution("transformers").version
+                    torch_version = torch.__version__
+
+                    # Check if we have a recent enough version for native optimizations
+                    transformers_major = int(transformers_version.split('.')[0])
+                    transformers_minor = int(transformers_version.split('.')[1])
+                    torch_major = int(torch_version.split('.')[0])
+                    torch_minor = int(torch_version.split('.')[1])
+
+                    if (transformers_major >= 4 and transformers_minor >= 36 and
+                        torch_major >= 2 and torch_minor >= 1):
+                        logger.info("Using native PyTorch SDPA optimizations (no BetterTransformer needed)")
+                    else:
+                        # Use BetterTransformer for older versions
+                        from optimum.bettertransformer import BetterTransformer
+                        logger.info("Applying BetterTransformer optimization")
+                        self.model = BetterTransformer.transform(self.model)
                 except ImportError:
                     logger.warning("optimum package not found. Install with: pip install optimum")
                     logger.warning("Continuing without BetterTransformer optimization")
@@ -163,6 +163,8 @@ class LlamaInterface:
                     self.tokenizer("Hello", return_tensors="pt").to(self.device).input_ids,
                     max_new_tokens=1
                 )
+        else:
+            logger.info("Skipping warmup generation (fast init enabled)")
 
     def generate_multiple_paths(
         self,
@@ -190,7 +192,6 @@ class LlamaInterface:
 
         paths = []
 
-        # Process all temperatures in parallel if possible
         for temp in temperatures:
             for _ in range(paths_per_temp):
                 config = GenerationConfig(**vars(generation_config))
@@ -208,8 +209,7 @@ class LlamaInterface:
         self,
         prompt: str,
         config: Optional[GenerationConfig] = None,
-        stream: bool = False,
-        fast_mode: bool = False
+        stream: bool = False
     ) -> Dict[str, Any]:
         """
         Generate a response from the model.
@@ -218,7 +218,6 @@ class LlamaInterface:
             prompt: Input prompt
             config: Generation configuration
             stream: Whether to stream the output
-            fast_mode: If True, skip collecting hidden states and attention
 
         Returns:
             Dictionary containing the generated text and associated metadata
@@ -226,18 +225,10 @@ class LlamaInterface:
         if config is None:
             config = GenerationConfig()
 
-        # Create local config to avoid modifying the input
-        local_config = GenerationConfig(**vars(config))
-
-        # Override settings in fast mode
-        if fast_mode:
-            local_config.output_hidden_states = False
-            local_config.output_attentions = False
-
         # Tokenize the prompt
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True).to(self.device)
         input_ids = inputs.input_ids
-        attention_mask = inputs.attention_mask.to(self.device)
+        attention_mask = inputs.attention_mask
 
         # Set up streaming if requested
         streamer = None
@@ -245,13 +236,14 @@ class LlamaInterface:
             streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True)
             generation_kwargs = dict(
                 input_ids=input_ids,
+                attention_mask=attention_mask,  # Always pass attention_mask
                 streamer=streamer,
-                max_new_tokens=local_config.max_new_tokens,
-                temperature=local_config.temperature,
-                top_p=local_config.top_p,
-                top_k=local_config.top_k,
-                repetition_penalty=local_config.repetition_penalty,
-                do_sample=local_config.do_sample,
+                max_new_tokens=config.max_new_tokens,
+                temperature=config.temperature,
+                top_p=config.top_p,
+                top_k=config.top_k,
+                repetition_penalty=config.repetition_penalty,
+                do_sample=config.do_sample,
             )
 
             # Start generation in a separate thread
@@ -262,25 +254,20 @@ class LlamaInterface:
 
         # Generate without streaming
         with torch.no_grad():
-            generate_kwargs = {
-                "input_ids": input_ids,
-                "output_hidden_states": local_config.output_hidden_states,
-                "output_attentions": local_config.output_attentions,
-                "return_dict_in_generate": local_config.return_dict_in_generate,
-                "max_new_tokens": local_config.max_new_tokens,
-                "temperature": local_config.temperature,
-                "top_p": local_config.top_p,
-                "top_k": local_config.top_k,
-                "repetition_penalty": local_config.repetition_penalty,
-                "do_sample": local_config.do_sample,
-                "attention_mask": attention_mask,
-            }
-
-            # Only calculate scores if needed (not in fast mode)
-            if not fast_mode:
-                generate_kwargs["output_scores"] = True
-
-            outputs = self.model.generate(**generate_kwargs)
+            outputs = self.model.generate(
+                input_ids,
+                output_hidden_states=config.output_hidden_states,
+                output_attentions=config.output_attentions,
+                return_dict_in_generate=config.return_dict_in_generate,
+                max_new_tokens=config.max_new_tokens,
+                temperature=config.temperature,
+                top_p=config.top_p,
+                top_k=config.top_k,
+                repetition_penalty=config.repetition_penalty,
+                do_sample=config.do_sample,
+                output_scores = True,
+                attention_mask = attention_mask,
+            )
 
         # Get the generated text
         generated_ids = outputs.sequences
@@ -297,12 +284,8 @@ class LlamaInterface:
             "generated_ids": generated_ids,
         }
 
-        # Skip processing hidden states and attentions in fast mode
-        if fast_mode:
-            return result
-
         # Include hidden states and attentions if requested
-        if local_config.output_hidden_states and hasattr(outputs, "hidden_states"):
+        if config.output_hidden_states and hasattr(outputs, "hidden_states"):
             # Extract hidden states - these are tuples of tensors
             hidden_states = outputs.hidden_states
 
@@ -324,7 +307,7 @@ class LlamaInterface:
 
             result["hidden_states"] = processed_hidden_states
 
-        if local_config.output_attentions and hasattr(outputs, "attentions"):
+        if config.output_attentions and hasattr(outputs, "attentions"):
             # Similar processing for attention matrices
             attentions = outputs.attentions
             processed_attentions = []
