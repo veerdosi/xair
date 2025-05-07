@@ -22,6 +22,7 @@ from backend.utils.logging_utils import setup_logger, TimingLogger
 from backend.utils.device_utils import get_optimal_device, optimize_for_device
 from backend.utils.error_utils import handle_exceptions, XAIRError
 from backend.utils.viz_utils import export_visualization_report
+from backend.utils.progress_monitor import ProgressMonitor, Stage
 
 # Setup logger
 logger = setup_logger(name="xair", level=logging.INFO, use_rich=True)
@@ -108,15 +109,11 @@ def initialize_components(config: XAIRConfig):
     if hasattr(config, 'performance') and config.performance:
         logger.info(f"Using performance preset: {config.performance}")
         preset = get_performance_preset(config.performance)
-        # Update config with preset values, preserving explicit settings
-        if not hasattr(config, 'fast_mode') or config.fast_mode is None:
-            config.fast_mode = preset["fast_mode"]
-        if not hasattr(config, 'fast_init') or config.fast_init is None:
-            config.fast_init = preset["fast_init"]
-        if preset["temperatures"] and len(preset["temperatures"]) > 0:
-            config.cgrt.temperatures = preset["temperatures"]
-        if preset["paths_per_temp"]:
-            config.cgrt.paths_per_temp = preset["paths_per_temp"]
+        # Update config with preset values directly
+        config.fast_mode = preset["fast_mode"]
+        config.fast_init = preset["fast_init"]
+        config.cgrt.temperatures = preset["temperatures"]
+        config.cgrt.paths_per_temp = preset["paths_per_temp"]
     else:
         # Set defaults if not using a preset
         if not hasattr(config, 'fast_mode'):
@@ -352,6 +349,14 @@ def main():
         try:
             logger.info(f"Loading configuration from {args.config}...")
             config = XAIRConfig.load(args.config)
+
+            # Force apply performance settings if specified on command line
+            if hasattr(args, "performance") and args.performance:
+                logger.info(f"Overriding with command line performance preset: {args.performance}")
+                preset = get_performance_preset(args.performance)
+                config.performance = args.performance
+                config.fast_mode = preset["fast_mode"]
+                config.fast_init = preset["fast_init"]
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
             return

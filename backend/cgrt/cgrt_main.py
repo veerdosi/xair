@@ -14,6 +14,7 @@ from backend.cgrt.divergence import DivergenceDetector
 from backend.cgrt.tree_builder import CGRTBuilder
 from backend.cgrt.attention import AttentionAnalyzer
 from backend.cgrt.importance import ImportanceAdjuster
+from backend.utils.progress_monitor import ProgressMonitor, Stage
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +173,11 @@ class CGRT:
         self.paths = []  # Generated paths
         self.divergence_points = []  # Detected divergence points
 
+        # Create progress monitor
+        self.progress_monitor = ProgressMonitor(verbose=verbose)
+
         logger.info("CGRT system initialized successfully")
+        self.progress_monitor.complete_stage(Stage.INIT)
 
     def process_input(
         self,
@@ -203,6 +208,7 @@ class CGRT:
 
         # 1. Generate multiple reasoning paths
         logger.info("Generating multiple reasoning paths...")
+        self.progress_monitor.start_stage(Stage.CGRT_GENERATION)
         self.paths = self.llm.generate_multiple_paths(
             prompt,
             temperatures=self.temperatures,
@@ -210,6 +216,7 @@ class CGRT:
             generation_config=generation_config,
             fast_mode=self.fast_mode  # Pass fast mode to avoid collecting unnecessary data
         )
+        self.progress_monitor.complete_stage(Stage.CGRT_GENERATION)
 
         # Save the generation results if requested
         if save_results:
@@ -218,7 +225,9 @@ class CGRT:
 
         # 2. Identify divergence points
         logger.info("Identifying divergence points...")
+        self.progress_monitor.start_stage(Stage.CGRT_DIVERGENCE)
         self.divergence_points = self.divergence_detector.detect_divergences(self.paths)
+        self.progress_monitor.complete_stage(Stage.CGRT_DIVERGENCE)
 
         if save_results:
             divergence_path = os.path.join(self.output_dir, "divergence_points.json")
@@ -227,20 +236,24 @@ class CGRT:
 
         # 3. Build the tree
         logger.info("Building the tree...")
+        self.progress_monitor.start_stage(Stage.CGRT_TREE_BUILDING)
         self.tree_builder.build_tree(
             self.paths,
             self.divergence_points,
             self.llm.tokenizer
         )
+        self.progress_monitor.complete_stage(Stage.CGRT_TREE_BUILDING)
 
         # Skip attention analysis in fast mode
         if not self.fast_mode and self.attention_analyzer:
             # 4. Analyze attention
             logger.info("Analyzing attention patterns...")
+            self.progress_monitor.start_stage(Stage.CGRT_ATTENTION)
             self.attention_analyzer.update_tree_with_attention(
                 self.tree_builder,
                 self.paths
             )
+            self.progress_monitor.complete_stage(Stage.CGRT_ATTENTION)
         elif self.fast_mode:
             logger.info("Skipping attention analysis in fast mode")
 
@@ -251,6 +264,13 @@ class CGRT:
 
         end_time = time.time()
         logger.info(f"Input processing complete in {end_time - start_time:.2f} seconds")
+
+        # Return timing statistics
+        timing_stats = {
+            "total_processing_time": end_time - start_time,
+            "progress_report": self.progress_monitor.get_progress_report()
+        }
+
         return self.tree_builder.graph
 
     def adjust_node_importance(
